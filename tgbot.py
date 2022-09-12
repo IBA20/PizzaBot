@@ -2,24 +2,17 @@ import os
 import logging
 import redis
 import time
-import moltin
 import json
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from textwrap import dedent
-from dotenv import load_dotenv
 
-load_dotenv()
+import moltin
+
 
 logger = logging.getLogger(__file__)
 _database = None
-
-
-def get_config():
-    with open('config.json') as file:
-        return json.load(file)
 
 
 def get_access_token():
@@ -41,18 +34,14 @@ def show_cart(bot, update):
         get_access_token(), query.message.chat_id
     )
     total = cart_items['meta']['display_price']['with_tax']['formatted']
-    bot.delete_message(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id
-    )
     cart_summary = dedent(
         ''.join(
             [f"""
-            {n}. {el['name']}:
-            in cart: {el['quantity']}
-            sum: {el['meta']['display_price']['with_tax']['value']['formatted']}
+            {number}. {cart_item['name']}:
+            in cart: {cart_item['quantity']}
+            sum: {cart_item['meta']['display_price']['with_tax']['value']['formatted']}
             """
-             for n, el in enumerate(cart_items['data'], 1)
+             for number, cart_item in enumerate(cart_items['data'], 1)
              ]
         )
     )
@@ -68,6 +57,10 @@ def show_cart(bot, update):
         cart_summary,
         reply_markup=reply_markup,
     )
+    bot.delete_message(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id
+    )
 
 
 def show_menu(bot, update, callback=True):
@@ -77,27 +70,29 @@ def show_menu(bot, update, callback=True):
     else:
         query = update
     products = moltin.get_products(get_access_token())['data']
-    pricelist = moltin.get_all_prices(get_access_token(), db.get('moltin_pricebook_id').decode())
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                f"{product['attributes']['name']}: ${pricelist.get(product['attributes']['sku']):.2f}/kg",
-                callback_data=f"{product['id']}:{pricelist.get(product['attributes']['sku']):.2f}"
+    pricelist = moltin.get_all_prices(
+        get_access_token(), db.get('moltin_pricebook_id').decode()
+        )
+    keyboard = []
+    for product in products:
+        price = pricelist.get(product['attributes']['sku'])
+        if price and product['attributes']['status'] == 'live':
+            keyboard.append(
+                [InlineKeyboardButton(
+                    f"{product['attributes']['name']}: ${price:.2f}/kg",
+                    callback_data=f"{product['id']}:{price:.2f}"
+                )]
             )
-        ] for product in products 
-        if product['attributes']['status'] == 'live' 
-        and pricelist.get(product['attributes']['sku'])
-    ]
     keyboard.append([InlineKeyboardButton('Корзина', callback_data='cart')])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    bot.delete_message(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id
-    )
     query.message.reply_text(
         'Please choose:',
         reply_markup=reply_markup
+    )
+    bot.delete_message(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id
     )
 
 
@@ -112,13 +107,13 @@ def handle_menu(bot, update):
     if query.data == 'cart':
         show_cart(bot, update)
         return 'HANDLE_CART'
-    product_id, product_price = query.data.split(':')
+    product_id, price = query.data.split(':')
     product, stock = moltin.get_product(get_access_token(), product_id)
     main_image = product['relationships']['main_image']['data']
     if main_image:
         image_id = main_image['id']
     else:
-        image_id = get_config()['default_image_id']
+        image_id = os.getenv('DEFAULT_IMAGE_ID')
     image_url = moltin.get_image_url(get_access_token(), image_id)
     description = product['attributes'].get(
         'description',
@@ -131,10 +126,9 @@ def handle_menu(bot, update):
     if stock <= 0:
         description += '\nВРЕМЕННО НЕТ В ПРОДАЖЕ'
     else:
-        db.set(f'{query.message.chat_id}_product_in_work_id', product['id'])
-        db.set(
-            f'{query.message.chat_id}_product_in_work_description', description
-        )
+        product_context = f'{{"id": "{product["id"]}", "description": "{description}", "price": "{price}"}}'
+        db.set(f'{query.message.chat_id}_product_context', product_context)
+
         keyboard.insert(
             0,
             [InlineKeyboardButton('1kg', callback_data=1),
@@ -143,15 +137,16 @@ def handle_menu(bot, update):
         )
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.delete_message(
-        chat_id=query.message.chat_id,
-        message_id=query.message.message_id
-    )
+
     bot.send_photo(
         chat_id=query.message.chat_id,
         photo=image_url,
-        caption=f'{description}\n${product_price}/kg',
+        caption=f'{description}\n${price}/kg',
         reply_markup=reply_markup,
+    )
+    bot.delete_message(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id
     )
     return 'HANDLE_DESCRIPTION'
 
@@ -167,12 +162,12 @@ def handle_description(bot, update):
         return 'HANDLE_CART'
     else:
         quantity = int(query.data)
-        product_id = db.get(
-            f'{query.message.chat_id}_product_in_work_id'
-        ).decode()
-        description = db.get(
-            f'{query.message.chat_id}_product_in_work_description'
-        ).decode()
+        product_context = json.loads(
+            db.get(f'{query.message.chat_id}_product_context').decode()
+        )
+        product_id = product_context['id']
+        description = product_context['description']
+        price = product_context['price']
 
         cart_items = moltin.add_product_to_cart(
             get_access_token(), query.message.chat_id, product_id, quantity
@@ -200,7 +195,7 @@ def handle_description(bot, update):
         bot.edit_message_caption(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
-            caption=f'{description}\n\nIn cart: {in_cart}',
+            caption=f'{description}\n${price}/kg\n\nIn cart: {in_cart}',
             reply_markup=reply_markup,
         )
         return 'HANDLE_DESCRIPTION'
@@ -246,7 +241,7 @@ def ask_email(bot, update):
         )
         if create_code == 201:
             message_text += f'\nПокупатель с email {update.message.text} ' \
-                           f'успешно добавлен в базу'
+                            f'успешно добавлен в базу'
         elif create_code == 422:
             update.message.reply_text('Некорректный email, повторите ввод')
             return 'WAITING_EMAIL'
@@ -315,7 +310,7 @@ def main():
     db = get_database_connection()
     pricebook_id = moltin.get_pricebook_id(get_access_token())
     db.set('moltin_pricebook_id', pricebook_id)
-    
+
     updater = Updater(os.getenv("TGBOT_TOKEN"))
     dispatcher = updater.dispatcher
 

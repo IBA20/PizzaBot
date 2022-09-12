@@ -10,6 +10,7 @@ def get_token() -> dict:
         'grant_type': 'client_credentials'
     }
     response = post(url, data=data)
+    response.raise_for_status()
     return response.json()
 
 
@@ -17,6 +18,7 @@ def get_products(access_token: str) -> dict:
     url = 'https://api.moltin.com/pcm/products'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    response.raise_for_status()
     return response.json()
 
 
@@ -24,6 +26,7 @@ def get_product(access_token: str, product_id: str) -> tuple:
     url = f'https://api.moltin.com/pcm/products/{product_id}'
     headers = {'Authorization': f'Bearer {access_token}'}
     product_response = get(url, headers=headers)
+    product_response.raise_for_status()
 
     url = f'https://api.moltin.com/v2/inventories/{product_id}'
     stock_response = get(url, headers=headers)
@@ -38,6 +41,7 @@ def get_image_url(access_token: str, file_id: str) -> str:
     url = f'https://api.moltin.com/v2/files/{file_id}'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    response.raise_for_status()
     return response.json()['data']['link']['href']
 
 
@@ -64,13 +68,15 @@ def get_cart_items(access_token: str, cart_ref: str) -> dict:
     url = f'https://api.moltin.com/v2/carts/{cart_ref}/items'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    response.raise_for_status()
     return response.json()
 
 
 def delete_cart_items(access_token: str, cart_id: str) -> None:
     url = f'https://api.moltin.com/v2/carts/{cart_id}/items'
     headers = {'Authorization': f'Bearer {access_token}'}
-    delete(url, headers=headers)
+    response = delete(url, headers=headers)
+    response.raise_for_status()
 
 
 def create_customer(access_token: str, name: str, email: str) -> int:
@@ -91,9 +97,11 @@ def create_customer(access_token: str, name: str, email: str) -> int:
 
 
 def get_customer_by_email(access_token: str, email: str) -> dict:
-    url = f'https://api.moltin.com/v2/customers?filter=eq(email,{email})'
+    url = 'https://api.moltin.com/v2/customers'
     headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
+    params = {'filter': f'eq(email,{email})'}
+    response = get(url, headers=headers, params=params)
+    response.raise_for_status()
     return response.json()
 
 
@@ -101,6 +109,7 @@ def get_pricebook_id(access_token: str) -> str:
     url = 'https://api.moltin.com/pcm/catalogs'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    response.raise_for_status()
     return response.json()['data'][0]['attributes']['pricebook_id']
 
 
@@ -108,9 +117,10 @@ def get_all_prices(access_token: str, pricebook_id: str) -> dict:
     url = f'https://api.moltin.com/pcm/pricebooks/{pricebook_id}/prices'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    response.raise_for_status()
     pricelist = {
-        position['attributes']['sku']: position['attributes']['currencies']['USD']['amount'] / 100
+        position['attributes']['sku']:
+            position['attributes']['currencies']['USD']['amount'] / 100
         for position in response.json()['data']
     }
     return pricelist
-    
