@@ -95,3 +95,22 @@ def get_customer_by_email(access_token: str, email: str) -> dict:
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
     return response.json()
+
+
+def get_pricebook_id(access_token: str) -> str:
+    url = 'https://api.moltin.com/pcm/catalogs'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = get(url, headers=headers)
+    return response.json()['data'][0]['attributes']['pricebook_id']
+
+
+def get_all_prices(access_token: str, pricebook_id: str) -> dict:
+    url = f'https://api.moltin.com/pcm/pricebooks/{pricebook_id}/prices'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = get(url, headers=headers)
+    pricelist = {
+        position['attributes']['sku']: position['attributes']['currencies']['USD']['amount'] / 100
+        for position in response.json()['data']
+    }
+    return pricelist
+    

@@ -71,18 +71,22 @@ def show_cart(bot, update):
 
 
 def show_menu(bot, update, callback=True):
+    db = get_database_connection()
     if callback:
         query = update.callback_query
     else:
         query = update
     products = moltin.get_products(get_access_token())['data']
+    pricelist = moltin.get_all_prices(get_access_token(), db.get('moltin_pricebook_id').decode())
     keyboard = [
         [
             InlineKeyboardButton(
-                product['attributes']['name'],
-                callback_data=product['id']
+                f"{product['attributes']['name']}: ${pricelist.get(product['attributes']['sku']):.2f}/kg",
+                callback_data=f"{product['id']}:{pricelist.get(product['attributes']['sku']):.2f}"
             )
-        ] for product in products if product['attributes']['status'] == 'live'
+        ] for product in products 
+        if product['attributes']['status'] == 'live' 
+        and pricelist.get(product['attributes']['sku'])
     ]
     keyboard.append([InlineKeyboardButton('Корзина', callback_data='cart')])
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -108,7 +112,8 @@ def handle_menu(bot, update):
     if query.data == 'cart':
         show_cart(bot, update)
         return 'HANDLE_CART'
-    product, stock = moltin.get_product(get_access_token(), query.data)
+    product_id, product_price = query.data.split(':')
+    product, stock = moltin.get_product(get_access_token(), product_id)
     main_image = product['relationships']['main_image']['data']
     if main_image:
         image_id = main_image['id']
@@ -145,7 +150,7 @@ def handle_menu(bot, update):
     bot.send_photo(
         chat_id=query.message.chat_id,
         photo=image_url,
-        caption=description,
+        caption=f'{description}\n${product_price}/kg',
         reply_markup=reply_markup,
     )
     return 'HANDLE_DESCRIPTION'
@@ -306,6 +311,11 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         level=logging.INFO
     )
+
+    db = get_database_connection()
+    pricebook_id = moltin.get_pricebook_id(get_access_token())
+    db.set('moltin_pricebook_id', pricebook_id)
+    
     updater = Updater(os.getenv("TGBOT_TOKEN"))
     dispatcher = updater.dispatcher
 
