@@ -126,8 +126,8 @@ def handle_menu(bot, update):
     if stock <= 0:
         description += '\nВРЕМЕННО НЕТ В ПРОДАЖЕ'
     else:
-        product_context = f'{{"id": "{product["id"]}", "description": "{description}", "price": "{price}"}}'
-        db.set(f'{query.message.chat_id}_product_context', product_context)
+        product_context = {"id": product["id"], "description": description, "price": price}
+        db.set(f'{query.message.chat_id}_product_context', json.dumps(product_context))            
 
         keyboard.insert(
             0,
@@ -162,9 +162,7 @@ def handle_description(bot, update):
         return 'HANDLE_CART'
     else:
         quantity = int(query.data)
-        product_context = json.loads(
-            db.get(f'{query.message.chat_id}_product_context').decode()
-        )
+        product_context = json.loads(db.get(f'{query.message.chat_id}_product_context').decode())
         product_id = product_context['id']
         description = product_context['description']
         price = product_context['price']
