@@ -162,13 +162,10 @@ def handle_description(bot, update):
         return 'HANDLE_CART'
     else:
         quantity = int(query.data)
-        product_context = json.loads(db.get(f'{query.message.chat_id}_product_context').decode())
-        product_id = product_context['id']
-        description = product_context['description']
-        price = product_context['price']
+        product = json.loads(db.get(f'{query.message.chat_id}_product_context').decode())
 
         cart_items = moltin.add_product_to_cart(
-            get_access_token(), query.message.chat_id, product_id, quantity
+            get_access_token(), query.message.chat_id, product['id'], quantity
         ).get('data')
         if not cart_items:
             bot.answer_callback_query(
@@ -179,7 +176,7 @@ def handle_description(bot, update):
             return 'HANDLE_DESCRIPTION'
         in_cart = 0
         for item in cart_items:
-            if item['product_id'] == product_id:
+            if item['product_id'] == product['id']:
                 in_cart = item['quantity']
         keyboard = [
             [InlineKeyboardButton('1kg', callback_data=1),
@@ -193,7 +190,7 @@ def handle_description(bot, update):
         bot.edit_message_caption(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
-            caption=f'{description}\n${price}/kg\n\nIn cart: {in_cart}',
+            caption=f'{product["description"]}\n${product["price"]}/kg\n\nIn cart: {in_cart}',
             reply_markup=reply_markup,
         )
         return 'HANDLE_DESCRIPTION'
