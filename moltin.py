@@ -61,6 +61,8 @@ def add_product_to_cart(
         }
     }
     response = post(url, headers=headers, json=payload)
+    if response.status_code != 400:  # Insufficient stock returns status 400
+        response.raise_for_status()
     return response.json()
 
 
@@ -93,6 +95,8 @@ def create_customer(access_token: str, name: str, email: str) -> int:
         },
     }
     response = post(url, headers=headers, json=payload)
+    if response.status_code != 422:  # Failed email validation returns code 422
+        response.raise_for_status()
     return response.status_code
 
 
