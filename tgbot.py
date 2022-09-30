@@ -17,13 +17,13 @@ _database = None
 
 def get_access_token():
     db = get_database_connection()
-    expires = db.get('moltin_expires')
+    expires = db.get('moltin_pizzastore_expires')
     if expires and int(expires.decode()) > time.time() + 60:
-        return db.get('moltin_token').decode()
+        return db.get('moltin_pizzastore_token').decode()
     token_data = moltin.get_token()
-    db.set('moltin_expires', token_data['expires'])
+    db.set('moltin_pizzastore_expires', token_data['expires'])
     token = token_data['access_token']
-    db.set('moltin_token', token)
+    db.set('moltin_pizzastore_token', token)
     return token
 
 
@@ -64,22 +64,22 @@ def show_cart(bot, update):
 
 
 def show_menu(bot, update, callback=True):
-    db = get_database_connection()
+    # db = get_database_connection()
     if callback:
         query = update.callback_query
     else:
         query = update
     products = moltin.get_products(get_access_token())['data']
-    pricelist = moltin.get_all_prices(
-        get_access_token(), db.get('moltin_pricebook_id').decode()
-        )
+    # pricelist = moltin.get_all_prices(
+    #     get_access_token(), db.get('moltin_pricebook_id').decode()
+    #     )
     keyboard = []
     for product in products:
-        price = pricelist.get(product['attributes']['sku'])
-        if price and product['attributes']['status'] == 'live':
+        price = product['price'][0]['amount']
+        if price and product['status'] == 'live':
             keyboard.append(
                 [InlineKeyboardButton(
-                    f"{product['attributes']['name']}: ${price:.2f}/kg",
+                    f"{product['name']}: ${price:.2f}/kg",
                     callback_data=f"{product['id']}:{price:.2f}"
                 )]
             )
@@ -108,14 +108,15 @@ def handle_menu(bot, update):
         show_cart(bot, update)
         return 'HANDLE_CART'
     product_id, price = query.data.split(':')
-    product, stock = moltin.get_product(get_access_token(), product_id)
+    product = moltin.get_product(get_access_token(), product_id)
     main_image = product['relationships']['main_image']['data']
     if main_image:
         image_id = main_image['id']
     else:
         image_id = os.getenv('DEFAULT_IMAGE_ID')
     image_url = moltin.get_image_url(get_access_token(), image_id)
-    description = product['attributes'].get(
+    print(image_url)
+    description = product.get(
         'description',
         'no description for this product'
     )
@@ -123,18 +124,18 @@ def handle_menu(bot, update):
         [InlineKeyboardButton('Назад', callback_data='menu')],
         [InlineKeyboardButton('Корзина', callback_data='cart')],
     ]
-    if stock <= 0:
-        description += '\nВРЕМЕННО НЕТ В ПРОДАЖЕ'
-    else:
-        product_context = {"id": product["id"], "description": description, "price": price}
-        db.set(f'{query.message.chat_id}_product_context', json.dumps(product_context))            
+    # if stock <= 0:
+    #     description += '\nВРЕМЕННО НЕТ В ПРОДАЖЕ'
+    # else:
+    product_context = {"id": product["id"], "description": description, "price": price}
+    db.set(f'{query.message.chat_id}_product_context', json.dumps(product_context))            
 
-        keyboard.insert(
-            0,
-            [InlineKeyboardButton('1kg', callback_data=1),
-             InlineKeyboardButton('5kg', callback_data=5),
-             InlineKeyboardButton('20kg', callback_data=20)]
-        )
+    keyboard.insert(
+        0,
+        [InlineKeyboardButton('1kg', callback_data=1),
+         InlineKeyboardButton('5kg', callback_data=5),
+         InlineKeyboardButton('20kg', callback_data=20)]
+    )
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -303,8 +304,8 @@ def main():
     )
 
     db = get_database_connection()
-    pricebook_id = moltin.get_pricebook_id(get_access_token())
-    db.set('moltin_pricebook_id', pricebook_id)
+    # pricebook_id = moltin.get_pricebook_id(get_access_token())
+    # db.set('moltin_pricebook_id', pricebook_id)
 
     updater = Updater(os.getenv("TGBOT_TOKEN"))
     dispatcher = updater.dispatcher

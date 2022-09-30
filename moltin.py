@@ -1,5 +1,6 @@
 import os
 from requests import get, post, delete
+from slugify import slugify
 
 
 def get_token() -> dict:
@@ -15,32 +16,27 @@ def get_token() -> dict:
 
 
 def get_products(access_token: str) -> dict:
-    url = 'https://api.moltin.com/pcm/products'
+    url = 'https://api.moltin.com/v2/products'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
     response.raise_for_status()
     return response.json()
 
 
-def get_product(access_token: str, product_id: str) -> tuple:
-    url = f'https://api.moltin.com/pcm/products/{product_id}'
+def get_product(access_token: str, product_id: str) -> dict:
+    url = f'https://api.moltin.com/v2/products/{product_id}'
     headers = {'Authorization': f'Bearer {access_token}'}
     product_response = get(url, headers=headers)
     product_response.raise_for_status()
-
-    url = f'https://api.moltin.com/v2/inventories/{product_id}'
-    stock_response = get(url, headers=headers)
-    if stock_response.status_code == 404:
-        available = 0
-    else:
-        available = stock_response.json()['data']['available']
-    return product_response.json()['data'], available
+    return product_response.json()['data']
 
 
 def get_image_url(access_token: str, file_id: str) -> str:
+    print('file_id', file_id)
     url = f'https://api.moltin.com/v2/files/{file_id}'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
+    print(response.json())
     response.raise_for_status()
     return response.json()['data']['link']['href']
 
@@ -109,22 +105,69 @@ def get_customer_by_email(access_token: str, email: str) -> dict:
     return response.json()
 
 
-def get_pricebook_id(access_token: str) -> str:
-    url = 'https://api.moltin.com/pcm/catalogs'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
-    response.raise_for_status()
-    return response.json()['data'][0]['attributes']['pricebook_id']
-
-
-def get_all_prices(access_token: str, pricebook_id: str) -> dict:
-    url = f'https://api.moltin.com/pcm/pricebooks/{pricebook_id}/prices'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
-    response.raise_for_status()
-    pricelist = {
-        position['attributes']['sku']:
-            position['attributes']['currencies']['USD']['amount'] / 100
-        for position in response.json()['data']
+def create_product(access_token: str, product_data: dict) -> str:
+    url = 'https://api.moltin.com/v2/products'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
     }
-    return pricelist
+    payload = {
+        'data': {
+            "type": "product",
+            "name": product_data.get('name'),
+            "slug": product_data.get('slug', slugify(product_data.get('name'))),
+            "sku": product_data.get('sku'),
+            "description": product_data.get('description', 'no description available'),
+            "manage_stock": False,
+            "price": [
+                {
+                    "amount": product_data.get('price'),
+                    "currency": "RUB",
+                    "includes_tax": True
+                }
+            ],
+            "status": "live",
+            "commodity_type": "physical",
+        },
+    }
+    response = post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()['data']['id']
+
+
+def create_file(access_token: str, file_url: str) -> str:
+    url = 'https://api.moltin.com/v2/files'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+    }
+    files = {
+        'file_location': (None, file_url),
+    }
+    response = post(url, headers=headers, files=files)
+    response.raise_for_status()
+    return response.json()['data']['id']
+
+
+def set_main_image_relationship(access_token: str, product_id: str, image_id: str):
+    url = f'https://api.moltin.com/v2/products/{product_id}/relationships/main-image'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+            "type": "main_image",
+            "id": f'{image_id}'
+        },
+    }
+    response = post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
+def get_flows(access_token: str):
+    url = 'https://api.moltin.com/v2/flows'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = get(url, headers=headers)
+    response.raise_for_status()
+    print(response.json())
