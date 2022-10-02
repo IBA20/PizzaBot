@@ -1,5 +1,5 @@
 import os
-from requests import get, post, delete
+from requests import get, post, delete, put
 from slugify import slugify
 
 
@@ -15,10 +15,11 @@ def get_token() -> dict:
     return response.json()
 
 
-def get_products(access_token: str) -> dict:
+def get_products(access_token: str, limit=8, offset=0) -> dict:  # TODO: get default limit from env
     url = 'https://api.moltin.com/v2/products'
     headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
+    params = {'page[limit]': limit, 'page[offset]': offset}
+    response = get(url, headers=headers, params=params)
     response.raise_for_status()
     return response.json()
 
@@ -32,11 +33,9 @@ def get_product(access_token: str, product_id: str) -> dict:
 
 
 def get_image_url(access_token: str, file_id: str) -> str:
-    print('file_id', file_id)
     url = f'https://api.moltin.com/v2/files/{file_id}'
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
-    print(response.json())
     response.raise_for_status()
     return response.json()['data']['link']['href']
 
@@ -75,6 +74,25 @@ def delete_cart_items(access_token: str, cart_id: str) -> None:
     headers = {'Authorization': f'Bearer {access_token}'}
     response = delete(url, headers=headers)
     response.raise_for_status()
+
+
+def update_cart_item(
+        access_token: str, cart_id: str, item_id: str, quantity: int
+) -> dict:
+    url = f'https://api.moltin.com/v2/carts/{cart_id}/items/{item_id}'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+        'quantity': quantity
+        }
+    }
+    response = put(url, headers=headers, json=payload)
+    response.raise_for_status()
+    print('update_cart_item\n', response.json())
+    return response.json()
 
 
 def create_customer(access_token: str, name: str, email: str) -> int:
@@ -165,9 +183,79 @@ def set_main_image_relationship(access_token: str, product_id: str, image_id: st
     return response.json()
 
 
-def get_flows(access_token: str):
+# def get_flows(access_token: str):
+#     url = 'https://api.moltin.com/v2/flows'
+#     headers = {'Authorization': f'Bearer {access_token}'}
+#     response = get(url, headers=headers)
+#     response.raise_for_status()
+#     print(response.json())
+
+
+def create_flow(access_token: str, name: str, slug: str, description: str):
     url = 'https://api.moltin.com/v2/flows'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+            "type": "flow",
+            "name": f'{name}',
+            "slug": f'{slug}',
+            "description": f'{description}',
+            "enabled": True,
+        },
+    }
+    response = post(url, headers=headers, json=payload)
     response.raise_for_status()
-    print(response.json())
+    return response.json()['data']['id']
+
+
+def create_field(
+        access_token: str, name: str, slug: str, type: str, flow_id: str
+):
+    url = 'https://api.moltin.com/v2/fields'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+            "type": "field",
+            "name": f'{name}',
+            "slug": f'{slug}',
+            "field_type": f'{type}',
+            "description": "",
+            "required": True,
+            "enabled": True,
+            "relationships": {
+                "flow": {
+                    "data": {
+                        "type": "flow",
+                        "id": f'{flow_id}'
+                    }
+                }
+            }
+        },
+    }
+    response = post(url, headers=headers, json=payload)
+    response.raise_for_status()
+
+
+def create_pizzeria(access_token: str, pizzeria_data: dict):
+    url = 'https://api.moltin.com/v2/flows/pizzeria/entries'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+            "type": "entry",
+            "address": pizzeria_data.get('address'),
+            "alias": pizzeria_data.get('alias'),
+            "lat": pizzeria_data.get('lat'),
+            "lon": pizzeria_data.get('lon'),
+        },
+    }
+    response = post(url, headers=headers, json=payload)
+    response.raise_for_status()
