@@ -8,12 +8,12 @@ from telegram import ParseMode
 from telegram.ext import Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from textwrap import dedent
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 import moltin
 
 
-load_dotenv()
+# load_dotenv()
 logger = logging.getLogger(__file__)
 _database = None
 
@@ -54,7 +54,7 @@ def show_cart(bot, update):
         [InlineKeyboardButton('В магазин', callback_data='menu')],
         [InlineKeyboardButton('Изменить', callback_data='change')],
         [InlineKeyboardButton('Очистить корзину', callback_data='clear')],
-        [InlineKeyboardButton('Оплатить', callback_data='pay')],
+        [InlineKeyboardButton('Оформить заказ', callback_data='checkout')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.callback_query.message.reply_text(
@@ -69,7 +69,6 @@ def show_cart(bot, update):
 
 
 def show_menu(bot, update, callback=True, offset=0):
-    # db = get_database_connection()
     if callback:
         query = update.callback_query
     else:
@@ -224,7 +223,7 @@ def handle_cart(bot, update):
         moltin.delete_cart_items(get_access_token(), query.message.chat_id)
         show_menu(bot, update)
         return "HANDLE_MENU"
-    elif query.data == 'pay':
+    elif query.data == 'checkout':
         cart_summary = db.get(f'{query.message.chat_id}_cart_summary').decode()
         bot.edit_message_text(
             chat_id=query.message.chat_id,
@@ -232,9 +231,9 @@ def handle_cart(bot, update):
             text=cart_summary,
         )
         update.callback_query.message.reply_text(
-            'Сообщите, пожалуйста, email для связи с вами'
+            'Сообщите, пожалуйста, ваш адрес или пришлите геолокацию'
         )
-        return 'WAITING_EMAIL'
+        return 'WAITING_ADDRESS'
 
 
 def show_change_cart(bot, update):
@@ -244,21 +243,25 @@ def show_change_cart(bot, update):
         get_access_token(), query.message.chat_id
     )
     total = cart_items['meta']['display_price']['with_tax']['formatted']
-    keyboard = [
-        [
-            InlineKeyboardButton('-', callback_data=f"{item['quantity'] - 1}:{item['id']}"),
+    keyboard = []
+    for item in cart_items['data']:
+        keyboard.append([
             InlineKeyboardButton(
                 f"{item['name']}\n{item['quantity']} шт. на сумму "
                 f"{item['meta']['display_price']['with_tax']['value']['formatted']}",
                 callback_data='none'
-            ),
+            )]
+        )
+        keyboard.append([
+            InlineKeyboardButton('-', callback_data=f"{item['quantity'] - 1}:{item['id']}"),
+            InlineKeyboardButton('.............................', callback_data=' '),
             InlineKeyboardButton('+', callback_data=f"{item['quantity'] + 1}:{item['id']}"),
-        ] for item in cart_items['data']
-    ]
-    keyboard += [[InlineKeyboardButton('Готово', callback_data='cart')]]
+        ])
+
+    keyboard.append([InlineKeyboardButton('Готово', callback_data='cart')])
 
     cart_summary = f'\nВсего: {total}'
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(keyboard, row_width=3)
     update.callback_query.message.reply_text(
         cart_summary,
         reply_markup=reply_markup,
@@ -280,14 +283,27 @@ def handle_change_cart(bot, update):
             item_id,
             int(quantity),
         )
-
+        show_change_cart(bot, update)
     elif query.data == 'cart':
         show_cart(bot, update)
         return 'HANDLE_CART'
-    show_change_cart(bot, update)
+    
     return "HANDLE_CHANGE_CART"
 
 
+
+
+def ask_address(bot, update):
+    message = None
+    if update.edited_message:
+        message = update.edited_message
+    else:
+        message = update.message
+    current_pos = (message.location.latitude, message.location.longitude)
+    print(current_pos)
+    return 'WAITING_ADDRESS'
+
+    
 def ask_email(bot, update):
     if not update.message:
         return 'WAITING_EMAIL'
@@ -337,7 +353,8 @@ def handle_users_reply(bot, update):
     states_functions = {
         'START': start, 'HANDLE_MENU': handle_menu,
         'HANDLE_DESCRIPTION': handle_description, 'HANDLE_CART': handle_cart,
-        'HANDLE_CHANGE_CART': handle_change_cart, 'WAITING_EMAIL': ask_email
+        'HANDLE_CHANGE_CART': handle_change_cart, 'WAITING_EMAIL': ask_email,
+        'WAITING_ADDRESS': ask_address,
     }
     state_handler = states_functions[user_state]
     # Если вы вдруг не заметите, что python-telegram-bot перехватывает ошибки.
@@ -375,6 +392,7 @@ def main():
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
+    dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
 

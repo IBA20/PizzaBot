@@ -91,7 +91,6 @@ def update_cart_item(
     }
     response = put(url, headers=headers, json=payload)
     response.raise_for_status()
-    print('update_cart_item\n', response.json())
     return response.json()
 
 
