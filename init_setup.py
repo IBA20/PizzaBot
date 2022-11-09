@@ -57,6 +57,28 @@ def import_addresses_from_json():
         moltin.create_pizzeria(get_access_token(), pizzeria_data)
 
 
+def create_customer_address_flow():
+    flow_id = moltin.create_flow(
+        get_access_token(),
+        name='CustomerAddress',
+        slug='customer_address',
+        description='Stores customer delivery addresses',
+    )
+    fields = [
+        {'name': 'Address', 'slug': 'address', 'type': 'string'},
+        {'name': 'Latitude', 'slug': 'lat', 'type': 'float'},
+        {'name': 'Longitude', 'slug': 'lon', 'type': 'float'},
+    ]
+    for field in fields:
+        moltin.create_field(
+            get_access_token(),
+            name=field['name'],
+            slug=field['slug'],
+            type=field['type'],
+            flow_id=flow_id,
+        )
+
+
 def main():
     import_products_from_json()
     create_pizzeria_flow()

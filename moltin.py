@@ -258,3 +258,11 @@ def create_pizzeria(access_token: str, pizzeria_data: dict):
     }
     response = post(url, headers=headers, json=payload)
     response.raise_for_status()
+
+
+def get_pizzerias(access_token: str):
+    url = 'https://api.moltin.com/v2/flows/pizzeria/entries'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()

@@ -3,17 +3,20 @@ import logging
 import redis
 import time
 import json
+
+import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram import ParseMode
 from telegram.ext import Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from textwrap import dedent
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 import moltin
+from geofunctions import fetch_coordinates, get_distance
 
 
-# load_dotenv()
+load_dotenv()
 logger = logging.getLogger(__file__)
 _database = None
 
@@ -261,7 +264,7 @@ def show_change_cart(bot, update):
     keyboard.append([InlineKeyboardButton('Готово', callback_data='cart')])
 
     cart_summary = f'\nВсего: {total}'
-    reply_markup = InlineKeyboardMarkup(keyboard, row_width=3)
+    reply_markup = InlineKeyboardMarkup(keyboard)
     update.callback_query.message.reply_text(
         cart_summary,
         reply_markup=reply_markup,
@@ -291,17 +294,93 @@ def handle_change_cart(bot, update):
     return "HANDLE_CHANGE_CART"
 
 
-
-
 def ask_address(bot, update):
-    message = None
-    if update.edited_message:
-        message = update.edited_message
+    # message = None
+    # if update.edited_message:
+    #     message = update.edited_message
+    # else:
+    message = update.message
+    if message.location:
+        current_pos = (message.location.latitude, message.location.longitude)
     else:
-        message = update.message
-    current_pos = (message.location.latitude, message.location.longitude)
+        try:
+            current_pos = fetch_coordinates(message.text)
+            assert current_pos != (None, None)
+        except requests.HTTPError:
+            update.message.reply_text(
+                'Ошибка определения координат. Попробуйте еще раз'
+            )
+            return 'WAITING_ADDRESS'
+        except AssertionError:
+            update.message.reply_text(
+                'Адрес не найден. Попробуйте еще раз'
+                )
+            return 'WAITING_ADDRESS'
+        pass
     print(current_pos)
+    pizzerias = moltin.get_pizzerias(get_access_token())['data']
+    distances = [
+        {
+            'address': pizzeria['address'],
+            'distance': get_distance(
+                current_pos,
+                (pizzeria['lat'], pizzeria['lon'])
+            )
+        } for pizzeria in pizzerias
+    ]
+    distances.sort(key=lambda x: x['distance'])
+    print(distances)
+    nearest = distances[0]['distance']
+    text = f"Ближайшая пиццерия находится по адресу: {distances[0]['address']}."
+    if nearest < 0.5:
+        keyboard = [[
+            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
+            InlineKeyboardButton('Доставка', callback_data='delivery:0'),
+        ]]
+        text += " Вы можете забрать заказ самостоятельно " \
+                "или выбрать бесплатную доставку"
+    elif nearest < 5:
+        keyboard = [[
+            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
+            InlineKeyboardButton('Доставка +100₽', callback_data='delivery:100'),
+        ]]
+        text += " Вы можете забрать заказ самостоятельно " \
+                "или заказать доставку за 100₽."
+    elif nearest < 20:
+        keyboard = [[
+            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
+            InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300'),
+        ]]
+        text += " Вы можете забрать заказ самостоятельно " \
+                "или заказать доставку за 300₽."
+    else:
+        keyboard = [[
+            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
+            InlineKeyboardButton(
+                'Отмена', callback_data='cancel'
+                ),
+        ]]
+        text += " Возможен только самовывоз."
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text(
+        text,
+        reply_markup=reply_markup,
+    )
+
     return 'WAITING_ADDRESS'
+
+
+def handle_delivery(bot, update):
+    query = update.callback_query
+    if query.data == 'cancel':
+        moltin.delete_cart_items(get_access_token(), query.message.chat_id)
+        return 'START'
+    elif query.data == 'pickup':
+        update.callback_query.message.reply_text('Ждем вас!')
+        return 'START'
+    elif query.data.startswith('delivery'):
+        pass
 
     
 def ask_email(bot, update):
@@ -354,7 +433,7 @@ def handle_users_reply(bot, update):
         'START': start, 'HANDLE_MENU': handle_menu,
         'HANDLE_DESCRIPTION': handle_description, 'HANDLE_CART': handle_cart,
         'HANDLE_CHANGE_CART': handle_change_cart, 'WAITING_EMAIL': ask_email,
-        'WAITING_ADDRESS': ask_address,
+        'WAITING_ADDRESS': ask_address, 'HANDLE_DELIVERY': handle_delivery,
     }
     state_handler = states_functions[user_state]
     # Если вы вдруг не заметите, что python-telegram-bot перехватывает ошибки.
