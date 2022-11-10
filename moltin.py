@@ -182,12 +182,12 @@ def set_main_image_relationship(access_token: str, product_id: str, image_id: st
     return response.json()
 
 
-# def get_flows(access_token: str):
-#     url = 'https://api.moltin.com/v2/flows'
-#     headers = {'Authorization': f'Bearer {access_token}'}
-#     response = get(url, headers=headers)
-#     response.raise_for_status()
-#     print(response.json())
+def get_flows(access_token: str):
+    url = 'https://api.moltin.com/v2/flows'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = get(url, headers=headers)
+    response.raise_for_status()
+    print(response.json())
 
 
 def create_flow(access_token: str, name: str, slug: str, description: str):

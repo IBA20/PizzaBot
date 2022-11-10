@@ -10,13 +10,13 @@ from telegram import ParseMode
 from telegram.ext import Filters, Updater
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from textwrap import dedent
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 import moltin
 from geofunctions import fetch_coordinates, get_distance
 
 
-load_dotenv()
+# load_dotenv()
 logger = logging.getLogger(__file__)
 _database = None
 
@@ -295,10 +295,6 @@ def handle_change_cart(bot, update):
 
 
 def ask_address(bot, update):
-    # message = None
-    # if update.edited_message:
-    #     message = update.edited_message
-    # else:
     message = update.message
     if message.location:
         current_pos = (message.location.latitude, message.location.longitude)
@@ -335,21 +331,21 @@ def ask_address(bot, update):
     if nearest < 0.5:
         keyboard = [[
             InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка', callback_data='delivery:0'),
+            InlineKeyboardButton('Доставка', callback_data='delivery:0:{current_pos[0]}:{current_pos[1]}'),
         ]]
         text += " Вы можете забрать заказ самостоятельно " \
                 "или выбрать бесплатную доставку"
     elif nearest < 5:
         keyboard = [[
             InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка +100₽', callback_data='delivery:100'),
+            InlineKeyboardButton('Доставка +100₽', callback_data=f'delivery:100:{current_pos[0]}:{current_pos[1]}'),
         ]]
         text += " Вы можете забрать заказ самостоятельно " \
                 "или заказать доставку за 100₽."
     elif nearest < 20:
         keyboard = [[
             InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300'),
+            InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300:{current_pos[0]}:{current_pos[1]}'),
         ]]
         text += " Вы можете забрать заказ самостоятельно " \
                 "или заказать доставку за 300₽."
@@ -368,7 +364,7 @@ def ask_address(bot, update):
         reply_markup=reply_markup,
     )
 
-    return 'WAITING_ADDRESS'
+    return 'HANDLE_DELIVERY'
 
 
 def handle_delivery(bot, update):
@@ -380,7 +376,10 @@ def handle_delivery(bot, update):
         update.callback_query.message.reply_text('Ждем вас!')
         return 'START'
     elif query.data.startswith('delivery'):
-        pass
+        bot.send_message(
+            os.getenv("COURIER_TG_ID"),
+            
+        )
 
     
 def ask_email(bot, update):

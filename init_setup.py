@@ -43,6 +43,21 @@ def create_pizzeria_flow():
             flow_id=flow_id,
         )
 
+def add_courier_field_to_pizzeria():
+    flows = moltin.get_flows(get_access_token())['data']
+    for flow in flows:
+        if flow['slug'] == 'pizzeria':
+            flow_id = flow['id']
+    else:
+        return
+    moltin.create_field(
+            get_access_token(),
+            name='Courier Telegram ID',
+            slug='couriertg',
+            type='string',
+            flow_id=flow_id,
+        )
+
 
 def import_addresses_from_json():
     with open('addresses.json', encoding="utf-8") as file:
