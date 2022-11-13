@@ -5,18 +5,21 @@ import time
 import json
 
 import requests
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup,
+    ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, ReplyKeyboardRemove,
+)
 from telegram import ParseMode
-from telegram.ext import Filters, Updater
+from telegram.ext import Filters, Updater, PreCheckoutQueryHandler
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 from textwrap import dedent
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 import moltin
 from geofunctions import fetch_coordinates, get_distance
 
 
-# load_dotenv()
+load_dotenv()
 logger = logging.getLogger(__file__)
 _database = None
 
@@ -39,7 +42,7 @@ def show_cart(bot, update):
     cart_items = moltin.get_cart_items(
         get_access_token(), query.message.chat_id
     )
-    total = cart_items['meta']['display_price']['with_tax']['formatted']
+    total = cart_items['meta']['display_price']['with_tax']['amount']
     cart_summary = dedent(
         ''.join(
             [f"""
@@ -51,16 +54,17 @@ def show_cart(bot, update):
              ]
         )
     )
-    cart_summary += f'\n*Всего: {total}*'
+    cart_summary += f'\n*Всего: ₽{total}*'
     db.set(f'{query.message.chat_id}_cart_summary', cart_summary)
-    keyboard = [
-        [InlineKeyboardButton('В магазин', callback_data='menu')],
-        [InlineKeyboardButton('Изменить', callback_data='change')],
-        [InlineKeyboardButton('Очистить корзину', callback_data='clear')],
-        [InlineKeyboardButton('Оформить заказ', callback_data='checkout')],
-    ]
+    keyboard = [[InlineKeyboardButton('В магазин', callback_data='menu')]]
+    if total > 0:
+        keyboard += [
+            [InlineKeyboardButton('Изменить', callback_data='change')],
+            [InlineKeyboardButton('Очистить корзину', callback_data='clear')],
+            [InlineKeyboardButton('Оформить заказ', callback_data='checkout')],
+        ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.callback_query.message.reply_text(
+    query.message.reply_text(
         cart_summary,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
@@ -115,7 +119,7 @@ def show_menu(bot, update, callback=True, offset=0):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     query.message.reply_text(
-        'Please choose:',
+        'Пожалуйста, выберите пиццу:',
         reply_markup=reply_markup
     )
     bot.delete_message(
@@ -124,12 +128,16 @@ def show_menu(bot, update, callback=True, offset=0):
     )
 
 
-def start(bot, update):
+def start(bot, update, job_queue):
+    update.message.reply_text(
+        'Добро пожаловать!',
+        reply_markup=ReplyKeyboardRemove()
+    )
     show_menu(bot, update, callback=False)
     return "HANDLE_MENU"
 
 
-def handle_menu(bot, update):
+def handle_menu(bot, update, job_queue):
     db = get_database_connection()
     query = update.callback_query
     if query.data == 'cart':
@@ -171,7 +179,7 @@ def handle_menu(bot, update):
     return 'HANDLE_DESCRIPTION'
 
 
-def handle_description(bot, update):
+def handle_description(bot, update, job_queue):
     db = get_database_connection()
     query = update.callback_query
     if query.data == 'menu':
@@ -213,14 +221,14 @@ def handle_description(bot, update):
         return 'HANDLE_DESCRIPTION'
 
 
-def handle_cart(bot, update):
+def handle_cart(bot, update, job_queue):
     db = get_database_connection()
     query = update.callback_query
     if query.data == 'menu':
         show_menu(bot, update)
         return "HANDLE_MENU"
     elif query.data == 'change':
-        show_change_cart(bot, update)
+        show_change_cart(bot, update, job_queue)
         return "HANDLE_CHANGE_CART"
     elif query.data == 'clear':
         moltin.delete_cart_items(get_access_token(), query.message.chat_id)
@@ -232,6 +240,7 @@ def handle_cart(bot, update):
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
             text=cart_summary,
+            parse_mode=ParseMode.MARKDOWN
         )
         update.callback_query.message.reply_text(
             'Сообщите, пожалуйста, ваш адрес или пришлите геолокацию'
@@ -239,7 +248,7 @@ def handle_cart(bot, update):
         return 'WAITING_ADDRESS'
 
 
-def show_change_cart(bot, update):
+def show_change_cart(bot, update, job_queue):
     # db = get_database_connection()
     query = update.callback_query
     cart_items = moltin.get_cart_items(
@@ -275,7 +284,7 @@ def show_change_cart(bot, update):
     )
 
 
-def handle_change_cart(bot, update):
+def handle_change_cart(bot, update, job_queue):
     # db = get_database_connection()
     query = update.callback_query
     if query.data[0].isdigit():
@@ -286,7 +295,7 @@ def handle_change_cart(bot, update):
             item_id,
             int(quantity),
         )
-        show_change_cart(bot, update)
+        show_change_cart(bot, update, job_queue)
     elif query.data == 'cart':
         show_cart(bot, update)
         return 'HANDLE_CART'
@@ -294,15 +303,21 @@ def handle_change_cart(bot, update):
     return "HANDLE_CHANGE_CART"
 
 
-def ask_address(bot, update):
+def handle_address(bot, update, job_queue):
+    db = get_database_connection()
     message = update.message
+    delivery_data = {
+        'cost': 0, 'address': 'not provided'
+    }
     if message.location:
         current_pos = (message.location.latitude, message.location.longitude)
     else:
         try:
-            current_pos = fetch_coordinates(message.text)
+            current_pos = fetch_coordinates(message.text, os.getenv('YANDEX_GEOCODER_APIKEY'))
             assert current_pos != (None, None)
-        except requests.HTTPError:
+            delivery_data['address'] = message.text
+        except requests.HTTPError as err:
+            print(err)
             update.message.reply_text(
                 'Ошибка определения координат. Попробуйте еще раз'
             )
@@ -313,107 +328,198 @@ def ask_address(bot, update):
                 )
             return 'WAITING_ADDRESS'
         pass
-    print(current_pos)
     pizzerias = moltin.get_pizzerias(get_access_token())['data']
     distances = [
         {
             'address': pizzeria['address'],
+            'couriertg': pizzeria['couriertg'],
             'distance': get_distance(
                 current_pos,
                 (pizzeria['lat'], pizzeria['lon'])
             )
         } for pizzeria in pizzerias
     ]
-    distances.sort(key=lambda x: x['distance'])
     print(distances)
-    nearest = distances[0]['distance']
-    text = f"Ближайшая пиццерия находится по адресу: {distances[0]['address']}."
-    if nearest < 0.5:
-        keyboard = [[
-            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка', callback_data='delivery:0:{current_pos[0]}:{current_pos[1]}'),
-        ]]
-        text += " Вы можете забрать заказ самостоятельно " \
+    nearest = min(distances, key=lambda x: x['distance'])
+    delivery_data['location'] = current_pos
+    delivery_data['pizzeria'] = nearest
+    message_text = f"Ближайшая пиццерия находится по адресу: {nearest['address']}."
+    keyboard = [[InlineKeyboardButton('Самовывоз', callback_data='pickup')]]
+    if nearest['distance'] < 0.5:
+        keyboard[0].append(
+            InlineKeyboardButton('Доставка', callback_data='delivery:0')
+        )
+        message_text += " Вы можете забрать заказ самостоятельно " \
                 "или выбрать бесплатную доставку"
-    elif nearest < 5:
-        keyboard = [[
-            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка +100₽', callback_data=f'delivery:100:{current_pos[0]}:{current_pos[1]}'),
-        ]]
-        text += " Вы можете забрать заказ самостоятельно " \
+    elif nearest['distance'] < 5:
+        keyboard[0].append(
+            InlineKeyboardButton('Доставка +100₽', callback_data=f'delivery:100')
+        )
+        delivery_data['cost'] = 100
+        message_text += " Вы можете забрать заказ самостоятельно " \
                 "или заказать доставку за 100₽."
-    elif nearest < 20:
-        keyboard = [[
-            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300:{current_pos[0]}:{current_pos[1]}'),
-        ]]
-        text += " Вы можете забрать заказ самостоятельно " \
+    elif nearest['distance'] < 20:
+        keyboard[0].append(
+            InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300')
+        )
+        delivery_data['cost'] = 300
+        message_text += " Вы можете забрать заказ самостоятельно " \
                 "или заказать доставку за 300₽."
     else:
-        keyboard = [[
-            InlineKeyboardButton('Самовывоз', callback_data='pickup'),
-            InlineKeyboardButton(
-                'Отмена', callback_data='cancel'
-                ),
-        ]]
-        text += " Возможен только самовывоз."
+        keyboard[0].append(
+            InlineKeyboardButton('Отмена', callback_data='cancel')
+        )
+        message_text += " Возможен только самовывоз."
+
+    db.set(f'delivery_data_{message.chat_id}', json.dumps(delivery_data))
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
-        text,
+        message_text,
         reply_markup=reply_markup,
     )
 
     return 'HANDLE_DELIVERY'
 
 
-def handle_delivery(bot, update):
+def handle_delivery(bot, update, job_queue):
     query = update.callback_query
-    if query.data == 'cancel':
-        moltin.delete_cart_items(get_access_token(), query.message.chat_id)
-        return 'START'
-    elif query.data == 'pickup':
-        update.callback_query.message.reply_text('Ждем вас!')
+    if query.data in ('cancel', 'pickup'):
+        message_text = 'Ждем вас!'
+        if query.data == 'cancel':
+            moltin.delete_cart_items(get_access_token(), query.message.chat_id)
+            message_text = 'Заказ отменен'
+        reply_markup = ReplyKeyboardMarkup(
+            [[KeyboardButton(text="/start")]],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+        query.message.reply_text(message_text, reply_markup=reply_markup)
+        bot.delete_message(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id
+        )
         return 'START'
     elif query.data.startswith('delivery'):
-        bot.send_message(
-            os.getenv("COURIER_TG_ID"),
-            
+        delivery_cost = int(query.data.split(':')[1])
+        cart_items = moltin.get_cart_items(
+            get_access_token(), query.message.chat_id
+        )
+        prices = [LabeledPrice(
+            f"{item['name']}, {item['quantity']}шт.",
+            item['value']['amount'] * 100
+        ) for item in cart_items['data']]
+        if delivery_cost:
+            prices.append(LabeledPrice('Доставка', delivery_cost * 100))
+        bot.send_invoice(
+            chat_id=query.message.chat_id,
+            title='Заказ пиццы',
+            description='Стоимость заказа',
+            payload=query.message.chat_id,
+            provider_token=os.getenv('PAYMENT_TOKEN'),
+            start_parameter='test-payment',
+            currency='RUB',
+            prices=prices,
         )
 
-    
-def ask_email(bot, update):
-    if not update.message:
-        return 'WAITING_EMAIL'
-
-    customers = moltin.get_customer_by_email(
-        get_access_token(),
-        update.message.text,
-    ).get('data', [])
-    message_text = 'Спасибо за заказ!'
-    if not customers:
-        create_code = moltin.create_customer(
-            get_access_token(),
-            update.message.chat_id,
-            update.message.text,
+        bot.delete_message(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id
         )
-        if create_code == 201:
-            message_text += f'\nПокупатель с email {update.message.text} ' \
-                            f'успешно добавлен в базу'
-        elif create_code == 422:
-            update.message.reply_text('Некорректный email, повторите ввод')
-            return 'WAITING_EMAIL'
+        return 'HANDLE_RECEIPT'
+
+
+def ask_feedback(bot, job):
+    keyboard = [[
+        InlineKeyboardButton('Да', callback_data='yes'),
+        InlineKeyboardButton('Нет', callback_data='no')
+    ]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(
+        job.context,
+        'Сообщите, пожалуйста, вы получили заказ?',
+        reply_markup=reply_markup,
+    )
+
+
+def handle_feedback(bot, update, job_queue):
+    query = update.callback_query
+    if query.data == 'yes':
+        moltin.delete_cart_items(get_access_token(), query.message.chat_id)
+        message_text = 'Надеемся, что вам понравились наши пиццы!'
+    elif query.data == 'no':
+        message_text = dedent(
+            '''
+            Приносим свои извинения за задержку! 
+            В качестве компенсации данный заказ будет для вас бесплатным!
+            '''
+        )
     else:
-        customer = customers[0]
-        if customer['name'] != str(update.message.chat_id):
-            update.message.reply_text('Такой email уже используется')
-            return 'WAITING_EMAIL'
-
-    update.message.reply_text(message_text)
+        return 'HANDLE_FEEDBACK'
+    query.message.reply_text(
+        message_text,
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton(text="/start")]],
+            resize_keyboard=True
+        )
+    )
+    bot.delete_message(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id
+    )
     return 'START'
 
 
-def handle_users_reply(bot, update):
+def handle_receipt(bot, update, job_queue):
+    db = get_database_connection()
+    query = update.pre_checkout_query
+    if query.invoice_payload != str(query.from_user.id):
+        bot.answer_pre_checkout_query(
+            pre_checkout_query_id=query.id, ok=False,
+            error_message="Something went wrong..."
+            )
+        return 'HANDLE_RECEIPT'
+    else:
+        bot.answer_pre_checkout_query(pre_checkout_query_id=query.id, ok=True)
+    delivery_data = json.loads(
+        db.get(f'delivery_data_{query.from_user.id}').decode("utf-8")
+    )
+    moltin.create_customer_address(
+        get_access_token(),
+        address=delivery_data['address'],
+        lat=float(delivery_data['location'][0]),
+        lon=float(delivery_data['location'][1]),
+        tg_id=query.from_user.id,
+    )
+
+    cart_summary = db.get(
+        f'{query.from_user.id}_cart_summary'
+    ).decode("utf-8")
+    cart_summary += f'\nСтоимость доставки: {delivery_data["cost"]}₽'
+    cart_summary += f'\n[Связаться с клиентом](tg://user?id={query.from_user.id})'
+
+    bot.send_message(
+        delivery_data['pizzeria']['couriertg'],
+        cart_summary,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    bot.send_location(
+        delivery_data['pizzeria']['couriertg'],
+        latitude=float(delivery_data['location'][0]),
+        longitude=float(delivery_data['location'][1]),
+
+    )
+
+    job_queue.run_once(ask_feedback, 3600, context=query.from_user.id)
+    bot.send_message(
+        update.pre_checkout_query.from_user.id,
+        f'Оплата ₽{update.pre_checkout_query.total_amount / 100:.2f} получена. '
+        f'Спасибо за заказ! Ожидайте курьера в ближайшее время.'
+    )
+    return 'HANDLE_FEEDBACK'
+
+
+def handle_users_reply(bot, update, job_queue):
     db = get_database_connection()
     if update.message:
         user_reply = update.message.text
@@ -421,6 +527,10 @@ def handle_users_reply(bot, update):
     elif update.callback_query:
         user_reply = update.callback_query.data
         chat_id = update.callback_query.message.chat_id
+    elif update.pre_checkout_query:
+        print(update.pre_checkout_query)
+        user_reply = ''
+        chat_id = update.pre_checkout_query.from_user.id
     else:
         return
     if user_reply == '/start':
@@ -431,15 +541,16 @@ def handle_users_reply(bot, update):
     states_functions = {
         'START': start, 'HANDLE_MENU': handle_menu,
         'HANDLE_DESCRIPTION': handle_description, 'HANDLE_CART': handle_cart,
-        'HANDLE_CHANGE_CART': handle_change_cart, 'WAITING_EMAIL': ask_email,
-        'WAITING_ADDRESS': ask_address, 'HANDLE_DELIVERY': handle_delivery,
+        'HANDLE_CHANGE_CART': handle_change_cart,
+        'WAITING_ADDRESS': handle_address, 'HANDLE_DELIVERY': handle_delivery,
+        'HANDLE_FEEDBACK': handle_feedback, 'HANDLE_RECEIPT': handle_receipt,
     }
     state_handler = states_functions[user_state]
     # Если вы вдруг не заметите, что python-telegram-bot перехватывает ошибки.
     # Оставляю этот try...except, чтобы код не падал молча.
     # Этот фрагмент можно переписать.
     try:
-        next_state = state_handler(bot, update)
+        next_state = state_handler(bot, update, job_queue)
         db.set(chat_id, next_state)
     except Exception as err:
         print(err)
@@ -469,10 +580,22 @@ def main():
     updater = Updater(os.getenv("TGBOT_TOKEN"))
     dispatcher = updater.dispatcher
 
-    dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.location, handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
-    dispatcher.add_handler(CommandHandler('start', handle_users_reply))
+    dispatcher.add_handler(CallbackQueryHandler(
+        handle_users_reply, pass_job_queue=True
+    ))
+    dispatcher.add_handler(PreCheckoutQueryHandler(
+            handle_users_reply, pass_job_queue=True
+        )
+    )
+    dispatcher.add_handler(MessageHandler(
+        Filters.location, handle_users_reply, pass_job_queue=True
+    ))
+    dispatcher.add_handler(MessageHandler(
+        Filters.text, handle_users_reply, pass_job_queue=True
+    ))
+    dispatcher.add_handler(CommandHandler(
+        'start', handle_users_reply, pass_job_queue=True
+    ))
 
     updater.start_polling()
     updater.idle()

@@ -21,7 +21,7 @@ def fetch_coordinates(address, apikey=os.getenv('YANDEX_GEOCODER_APIKEY')):
 
     most_relevant = found_places[0]
     lon, lat = most_relevant['GeoObject']['Point']['pos'].split(" ")
-    return lon, lat
+    return lat, lon
 
 
 def get_distance(location1: tuple, location2: tuple) -> float:

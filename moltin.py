@@ -15,7 +15,7 @@ def get_token() -> dict:
     return response.json()
 
 
-def get_products(access_token: str, limit=8, offset=0) -> dict:  # TODO: get default limit from env
+def get_products(access_token: str, limit=8, offset=0) -> dict:
     url = 'https://api.moltin.com/v2/products'
     headers = {'Authorization': f'Bearer {access_token}'}
     params = {'page[limit]': limit, 'page[offset]': offset}
@@ -187,7 +187,7 @@ def get_flows(access_token: str):
     headers = {'Authorization': f'Bearer {access_token}'}
     response = get(url, headers=headers)
     response.raise_for_status()
-    print(response.json())
+    return response.json()
 
 
 def create_flow(access_token: str, name: str, slug: str, description: str):
@@ -211,7 +211,8 @@ def create_flow(access_token: str, name: str, slug: str, description: str):
 
 
 def create_field(
-        access_token: str, name: str, slug: str, type: str, flow_id: str
+        access_token: str, name: str, slug: str, type: str, flow_id: str,
+        **kwargs
 ):
     url = 'https://api.moltin.com/v2/fields'
     headers = {
@@ -237,6 +238,8 @@ def create_field(
             }
         },
     }
+    for key, value in kwargs.items():
+        payload['data'][key] = value
     response = post(url, headers=headers, json=payload)
     response.raise_for_status()
 
@@ -263,6 +266,29 @@ def create_pizzeria(access_token: str, pizzeria_data: dict):
 def get_pizzerias(access_token: str):
     url = 'https://api.moltin.com/v2/flows/pizzeria/entries'
     headers = {'Authorization': f'Bearer {access_token}'}
-    response = get(url, headers=headers)
+    params = {'page[limit]': 100}
+    response = get(url, headers=headers, params=params)
     response.raise_for_status()
     return response.json()
+
+
+def create_customer_address(
+        access_token: str, tg_id: str, lat: float, lon: float, address: str
+):
+    url = 'https://api.moltin.com/v2/flows/customer_address/entries'
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'data': {
+            "type": "entry",
+            "address": address,
+            "lat": lat,
+            "lon": lon,
+            "tg_id": tg_id
+        },
+    }
+    response = post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()['data']['id']
