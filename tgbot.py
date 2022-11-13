@@ -161,8 +161,12 @@ def handle_menu(bot, update, job_queue):
         [InlineKeyboardButton('Назад', callback_data='menu')],
         [InlineKeyboardButton('Корзина', callback_data='cart')],
     ]
-    product_context = {"id": product["id"], "description": description, "price": price}
-    db.set(f'{query.message.chat_id}_product_context', json.dumps(product_context))
+    product_context = {
+        "id": product["id"], "description": description, "price": price
+    }
+    db.set(
+        f'{query.message.chat_id}_product_context', json.dumps(product_context)
+    )
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -190,7 +194,9 @@ def handle_description(bot, update, job_queue):
         return 'HANDLE_CART'
     else:
         quantity = int(query.data)
-        product = json.loads(db.get(f'{query.message.chat_id}_product_context').decode())
+        product = json.loads(
+            db.get(f'{query.message.chat_id}_product_context').decode()
+        )
 
         cart_items = moltin.add_product_to_cart(
             get_access_token(), query.message.chat_id, product['id'], quantity
@@ -198,7 +204,7 @@ def handle_description(bot, update, job_queue):
         if not cart_items:
             bot.answer_callback_query(
                 callback_query_id=query.id,
-                text='Недостаточно товара на складе',
+                text='Что-то пошло не так..',
                 show_alert=True
             )
             return 'HANDLE_DESCRIPTION'
@@ -257,17 +263,21 @@ def show_change_cart(bot, update, job_queue):
     total = cart_items['meta']['display_price']['with_tax']['formatted']
     keyboard = []
     for item in cart_items['data']:
+        keyboard.append([InlineKeyboardButton(
+            f"{item['name']}\n{item['quantity']} шт. на сумму "
+            f"{item['meta']['display_price']['with_tax']['value']['formatted']}",
+            callback_data='none'
+        )])
         keyboard.append([
             InlineKeyboardButton(
-                f"{item['name']}\n{item['quantity']} шт. на сумму "
-                f"{item['meta']['display_price']['with_tax']['value']['formatted']}",
-                callback_data='none'
-            )]
-        )
-        keyboard.append([
-            InlineKeyboardButton('-', callback_data=f"{item['quantity'] - 1}:{item['id']}"),
-            InlineKeyboardButton('.............................', callback_data=' '),
-            InlineKeyboardButton('+', callback_data=f"{item['quantity'] + 1}:{item['id']}"),
+                '-', callback_data=f"{item['quantity'] - 1}:{item['id']}"
+            ),
+            InlineKeyboardButton(
+                '.............................', callback_data=' '
+            ),
+            InlineKeyboardButton(
+                '+', callback_data=f"{item['quantity'] + 1}:{item['id']}"
+            ),
         ])
 
     keyboard.append([InlineKeyboardButton('Готово', callback_data='cart')])
@@ -313,11 +323,12 @@ def handle_address(bot, update, job_queue):
         current_pos = (message.location.latitude, message.location.longitude)
     else:
         try:
-            current_pos = fetch_coordinates(message.text, os.getenv('YANDEX_GEOCODER_APIKEY'))
+            current_pos = fetch_coordinates(
+                message.text, os.getenv('YANDEX_GEOCODER_APIKEY')
+            )
             assert current_pos != (None, None)
             delivery_data['address'] = message.text
-        except requests.HTTPError as err:
-            print(err)
+        except requests.HTTPError:
             update.message.reply_text(
                 'Ошибка определения координат. Попробуйте еще раз'
             )
@@ -339,43 +350,42 @@ def handle_address(bot, update, job_queue):
             )
         } for pizzeria in pizzerias
     ]
-    print(distances)
     nearest = min(distances, key=lambda x: x['distance'])
     delivery_data['location'] = current_pos
     delivery_data['pizzeria'] = nearest
-    message_text = f"Ближайшая пиццерия находится по адресу: {nearest['address']}."
+    msg = f"Ближайшая пиццерия находится по адресу: {nearest['address']}."
     keyboard = [[InlineKeyboardButton('Самовывоз', callback_data='pickup')]]
     if nearest['distance'] < 0.5:
         keyboard[0].append(
             InlineKeyboardButton('Доставка', callback_data='delivery:0')
         )
-        message_text += " Вы можете забрать заказ самостоятельно " \
-                "или выбрать бесплатную доставку"
+        msg += " Вы можете забрать заказ самостоятельно " \
+            "или выбрать бесплатную доставку"
     elif nearest['distance'] < 5:
-        keyboard[0].append(
-            InlineKeyboardButton('Доставка +100₽', callback_data=f'delivery:100')
-        )
+        keyboard[0].append(InlineKeyboardButton(
+            'Доставка +100₽', callback_data=f'delivery:100'
+        ))
         delivery_data['cost'] = 100
-        message_text += " Вы можете забрать заказ самостоятельно " \
-                "или заказать доставку за 100₽."
+        msg += " Вы можете забрать заказ самостоятельно " \
+            "или заказать доставку за 100₽."
     elif nearest['distance'] < 20:
         keyboard[0].append(
             InlineKeyboardButton('Доставка +300₽', callback_data='delivery:300')
         )
         delivery_data['cost'] = 300
-        message_text += " Вы можете забрать заказ самостоятельно " \
-                "или заказать доставку за 300₽."
+        msg += " Вы можете забрать заказ самостоятельно " \
+            "или заказать доставку за 300₽."
     else:
         keyboard[0].append(
             InlineKeyboardButton('Отмена', callback_data='cancel')
         )
-        message_text += " Возможен только самовывоз."
+        msg += " Возможен только самовывоз."
 
     db.set(f'delivery_data_{message.chat_id}', json.dumps(delivery_data))
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
-        message_text,
+        msg,
         reply_markup=reply_markup,
     )
 
@@ -385,16 +395,16 @@ def handle_address(bot, update, job_queue):
 def handle_delivery(bot, update, job_queue):
     query = update.callback_query
     if query.data in ('cancel', 'pickup'):
-        message_text = 'Ждем вас!'
+        msg = 'Ждем вас!'
         if query.data == 'cancel':
             moltin.delete_cart_items(get_access_token(), query.message.chat_id)
-            message_text = 'Заказ отменен'
+            msg = 'Заказ отменен'
         reply_markup = ReplyKeyboardMarkup(
             [[KeyboardButton(text="/start")]],
             one_time_keyboard=True,
             resize_keyboard=True
         )
-        query.message.reply_text(message_text, reply_markup=reply_markup)
+        query.message.reply_text(msg, reply_markup=reply_markup)
         bot.delete_message(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id
@@ -446,9 +456,9 @@ def handle_feedback(bot, update, job_queue):
     query = update.callback_query
     if query.data == 'yes':
         moltin.delete_cart_items(get_access_token(), query.message.chat_id)
-        message_text = 'Надеемся, что вам понравились наши пиццы!'
+        msg = 'Надеемся, что вам понравились наши пиццы!'
     elif query.data == 'no':
-        message_text = dedent(
+        msg = dedent(
             '''
             Приносим свои извинения за задержку! 
             В качестве компенсации данный заказ будет для вас бесплатным!
@@ -457,7 +467,7 @@ def handle_feedback(bot, update, job_queue):
     else:
         return 'HANDLE_FEEDBACK'
     query.message.reply_text(
-        message_text,
+        msg,
         reply_markup=ReplyKeyboardMarkup(
             [[KeyboardButton(text="/start")]],
             resize_keyboard=True
@@ -492,15 +502,15 @@ def handle_receipt(bot, update, job_queue):
         tg_id=query.from_user.id,
     )
 
-    cart_summary = db.get(
+    msg = db.get(
         f'{query.from_user.id}_cart_summary'
     ).decode("utf-8")
-    cart_summary += f'\nСтоимость доставки: {delivery_data["cost"]}₽'
-    cart_summary += f'\n[Связаться с клиентом](tg://user?id={query.from_user.id})'
+    msg += f'\nСтоимость доставки: {delivery_data["cost"]}₽'
+    msg += f'\n[Связаться с клиентом](tg://user?id={query.from_user.id})'
 
     bot.send_message(
         delivery_data['pizzeria']['couriertg'],
-        cart_summary,
+        msg,
         parse_mode=ParseMode.MARKDOWN
     )
     bot.send_location(
@@ -528,7 +538,6 @@ def handle_users_reply(bot, update, job_queue):
         user_reply = update.callback_query.data
         chat_id = update.callback_query.message.chat_id
     elif update.pre_checkout_query:
-        print(update.pre_checkout_query)
         user_reply = ''
         chat_id = update.pre_checkout_query.from_user.id
     else:
