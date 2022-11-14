@@ -161,16 +161,10 @@ def handle_menu(bot, update, job_queue):
     description = f"{product.get('name')}\n" \
                   f"{product.get('description', 'нет описания')}"
     keyboard = [
-        [InlineKeyboardButton('Купить', callback_data=1)],
+        [InlineKeyboardButton('Купить', callback_data=product["id"])],
         [InlineKeyboardButton('Назад', callback_data='menu')],
         [InlineKeyboardButton('Корзина', callback_data='cart')],
     ]
-    product_context = {
-        "id": product["id"], "description": description, "price": price
-    }
-    db.set(
-        f'{query.message.chat_id}_product_context', json.dumps(product_context)
-    )
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -197,13 +191,15 @@ def handle_description(bot, update, job_queue):
         show_cart(bot, update)
         return 'HANDLE_CART'
     else:
-        quantity = int(query.data)
-        product = json.loads(
-            db.get(f'{query.message.chat_id}_product_context').decode()
-        )
+        product_id = query.data
+        product = moltin.get_product(get_access_token(), product_id)
+        quantity = 1
+        description = f"{product.get('name')}\n" \
+                      f"{product.get('description', 'нет описания')}"
+        price = product['price'][0]['amount']
 
         cart_items = moltin.add_product_to_cart(
-            get_access_token(), query.message.chat_id, product['id'], quantity
+            get_access_token(), query.message.chat_id, product_id, quantity
         ).get('data')
         if not cart_items:
             bot.answer_callback_query(
@@ -214,10 +210,10 @@ def handle_description(bot, update, job_queue):
             return 'HANDLE_DESCRIPTION'
         in_cart = 0
         for item in cart_items:
-            if item['product_id'] == product['id']:
+            if item['product_id'] == product_id:
                 in_cart = item['quantity']
         keyboard = [
-            [InlineKeyboardButton('Купить', callback_data=1)],
+            [InlineKeyboardButton('Купить', callback_data=product_id)],
             [InlineKeyboardButton('Назад', callback_data='menu')],
             [InlineKeyboardButton('Корзина', callback_data='cart')],
         ]
@@ -225,7 +221,7 @@ def handle_description(bot, update, job_queue):
         bot.edit_message_caption(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
-            caption=f'{product["description"]}\n₽{product["price"]}\n\nВ корзине: {in_cart}',
+            caption=f'{description}\n₽{price}\n\nВ корзине: {in_cart}',
             reply_markup=reply_markup,
         )
         return 'HANDLE_DESCRIPTION'
@@ -383,14 +379,13 @@ def handle_address(bot, update, job_queue):
         )
         msg += " Возможен только самовывоз."
 
-    db.set(f'delivery_data_{message.chat_id}', json.dumps(delivery_data))
+    db.set(f'{message.chat_id}_delivery_data', json.dumps(delivery_data))
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
         msg,
         reply_markup=reply_markup,
     )
-
     return 'HANDLE_DELIVERY'
 
 
@@ -499,7 +494,7 @@ def handle_success_payment(bot, update, job_queue):
     db = get_database_connection()
     query = update
     delivery_data = json.loads(
-        db.get(f'delivery_data_{query.message.chat_id}').decode("utf-8")
+        db.get(f'{query.message.chat_id}_delivery_data').decode("utf-8")
     )
     moltin.create_customer_address(
         get_access_token(),
