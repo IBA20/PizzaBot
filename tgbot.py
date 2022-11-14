@@ -521,7 +521,7 @@ def handle_success_payment(bot, update, job_queue):
 
     )
 
-    job_queue.run_once(ask_feedback, 20, context=query.message.chat_id)
+    job_queue.run_once(ask_feedback, 3600, context=query.message.chat_id)
     query.message.reply_text(
         f'Оплата ₽{query.message.successful_payment.total_amount / 100:.2f} получена. '
         f'Спасибо за заказ! Ожидайте курьера в ближайшее время.'
