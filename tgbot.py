@@ -40,26 +40,27 @@ def get_access_token():
     return next(token_generator())
 
 
-def show_cart(bot, update):
-    db = get_database_connection()
-    query = update.callback_query
-    cart_items = moltin.get_cart_items(
-        get_access_token(), query.message.chat_id
-    )
+def get_cart_summary(chat_id):
+    cart_items = moltin.get_cart_items(get_access_token(), chat_id)
     total = cart_items['meta']['display_price']['with_tax']['amount']
     cart_summary = dedent(
         ''.join(
             [f"""
-            {number}. {cart_item['name']}:
-            В корзине: {cart_item['quantity']}
-            Сумма: {cart_item['meta']['display_price']['with_tax']['value']['formatted']}
-            """
+                {number}. {cart_item['name']}:
+                В корзине: {cart_item['quantity']}
+                Сумма: {cart_item['meta']['display_price']['with_tax']['value']['formatted']}
+                """
              for number, cart_item in enumerate(cart_items['data'], 1)
              ]
         )
     )
     cart_summary += f'\n*Всего: ₽{total}*'
-    db.set(f'{query.message.chat_id}_cart_summary', cart_summary)
+    return total, cart_summary
+
+
+def show_cart(bot, update):
+    query = update.callback_query
+    total, cart_summary = get_cart_summary(query.message.chat_id)
     keyboard = [[InlineKeyboardButton('В магазин', callback_data='menu')]]
     if total > 0:
         keyboard += [
@@ -241,7 +242,7 @@ def handle_cart(bot, update, job_queue):
         show_menu(bot, update)
         return "HANDLE_MENU"
     elif query.data == 'checkout':
-        cart_summary = db.get(f'{query.message.chat_id}_cart_summary').decode()
+        _, cart_summary = get_cart_summary(query.message.chat_id)
         bot.edit_message_text(
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
@@ -504,9 +505,7 @@ def handle_success_payment(bot, update, job_queue):
         tg_id=query.message.chat_id,
     )
 
-    msg = db.get(
-        f'{query.message.chat_id}_cart_summary'
-    ).decode("utf-8")
+    _, msg = get_cart_summary(query.message.chat_id)
     msg += f'\nСтоимость доставки: {delivery_data["cost"]}₽'
     msg += f'\n[Связаться с клиентом](tg://user?id={query.message.chat_id})'
 
@@ -522,7 +521,7 @@ def handle_success_payment(bot, update, job_queue):
 
     )
 
-    job_queue.run_once(ask_feedback, 3600, context=query.message.chat_id)
+    job_queue.run_once(ask_feedback, 20, context=query.message.chat_id)
     query.message.reply_text(
         f'Оплата ₽{query.message.successful_payment.total_amount / 100:.2f} получена. '
         f'Спасибо за заказ! Ожидайте курьера в ближайшее время.'
