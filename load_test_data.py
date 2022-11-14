@@ -1,6 +1,7 @@
 import json
 import moltin
 from tgbot import get_access_token
+from dotenv import load_dotenv
 
 
 def import_products_from_json():
@@ -40,4 +41,5 @@ def main():
 
 
 if __name__ == '__main__':
+    load_dotenv()
     main()

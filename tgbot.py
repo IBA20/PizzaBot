@@ -19,7 +19,6 @@ import moltin
 from geofunctions import fetch_coordinates, get_distance
 
 
-load_dotenv()
 logger = logging.getLogger(__file__)
 _database = None
 
@@ -255,7 +254,6 @@ def handle_cart(bot, update, job_queue):
 
 
 def show_change_cart(bot, update, job_queue):
-    # db = get_database_connection()
     query = update.callback_query
     cart_items = moltin.get_cart_items(
         get_access_token(), query.message.chat_id
@@ -295,7 +293,6 @@ def show_change_cart(bot, update, job_queue):
 
 
 def handle_change_cart(bot, update, job_queue):
-    # db = get_database_connection()
     query = update.callback_query
     if query.data[0].isdigit():
         quantity, item_id = query.data.split(':')
@@ -338,7 +335,7 @@ def handle_address(bot, update, job_queue):
                 'Адрес не найден. Попробуйте еще раз'
                 )
             return 'WAITING_ADDRESS'
-        pass
+
     pizzerias = moltin.get_pizzerias(get_access_token())['data']
     distances = [
         {
@@ -436,7 +433,7 @@ def handle_delivery(bot, update, job_queue):
             chat_id=query.message.chat_id,
             message_id=query.message.message_id
         )
-        return 'HANDLE_RECEIPT'
+        return 'HANDLE_PRECHECKOUT'
 
 
 def ask_feedback(bot, job):
@@ -480,33 +477,38 @@ def handle_feedback(bot, update, job_queue):
     return 'START'
 
 
-def handle_receipt(bot, update, job_queue):
-    db = get_database_connection()
+def handle_precheckout(bot, update, job_queue):
     query = update.pre_checkout_query
     if query.invoice_payload != str(query.from_user.id):
         bot.answer_pre_checkout_query(
             pre_checkout_query_id=query.id, ok=False,
             error_message="Something went wrong..."
             )
-        return 'HANDLE_RECEIPT'
+        return 'HANDLE_PRECHECKOUT'
     else:
         bot.answer_pre_checkout_query(pre_checkout_query_id=query.id, ok=True)
+    return 'HANDLE_RECEIPT'
+
+
+def handle_success_payment(bot, update, job_queue):
+    db = get_database_connection()
+    query = update
     delivery_data = json.loads(
-        db.get(f'delivery_data_{query.from_user.id}').decode("utf-8")
+        db.get(f'delivery_data_{query.message.chat_id}').decode("utf-8")
     )
     moltin.create_customer_address(
         get_access_token(),
         address=delivery_data['address'],
         lat=float(delivery_data['location'][0]),
         lon=float(delivery_data['location'][1]),
-        tg_id=query.from_user.id,
+        tg_id=query.message.chat_id,
     )
 
     msg = db.get(
-        f'{query.from_user.id}_cart_summary'
+        f'{query.message.chat_id}_cart_summary'
     ).decode("utf-8")
     msg += f'\nСтоимость доставки: {delivery_data["cost"]}₽'
-    msg += f'\n[Связаться с клиентом](tg://user?id={query.from_user.id})'
+    msg += f'\n[Связаться с клиентом](tg://user?id={query.message.chat_id})'
 
     bot.send_message(
         delivery_data['pizzeria']['couriertg'],
@@ -520,10 +522,9 @@ def handle_receipt(bot, update, job_queue):
 
     )
 
-    job_queue.run_once(ask_feedback, 3600, context=query.from_user.id)
-    bot.send_message(
-        update.pre_checkout_query.from_user.id,
-        f'Оплата ₽{update.pre_checkout_query.total_amount / 100:.2f} получена. '
+    job_queue.run_once(ask_feedback, 3600, context=query.message.chat_id)
+    query.message.reply_text(
+        f'Оплата ₽{query.message.successful_payment.total_amount / 100:.2f} получена. '
         f'Спасибо за заказ! Ожидайте курьера в ближайшее время.'
     )
     return 'HANDLE_FEEDBACK'
@@ -552,7 +553,8 @@ def handle_users_reply(bot, update, job_queue):
         'HANDLE_DESCRIPTION': handle_description, 'HANDLE_CART': handle_cart,
         'HANDLE_CHANGE_CART': handle_change_cart,
         'WAITING_ADDRESS': handle_address, 'HANDLE_DELIVERY': handle_delivery,
-        'HANDLE_FEEDBACK': handle_feedback, 'HANDLE_RECEIPT': handle_receipt,
+        'HANDLE_FEEDBACK': handle_feedback, 'HANDLE_PRECHECKOUT': handle_precheckout,
+        'HANDLE_RECEIPT': handle_success_payment,
     }
     state_handler = states_functions[user_state]
     # Если вы вдруг не заметите, что python-telegram-bot перехватывает ошибки.
@@ -594,8 +596,10 @@ def main():
     ))
     dispatcher.add_handler(PreCheckoutQueryHandler(
             handle_users_reply, pass_job_queue=True
-        )
-    )
+    ))
+    dispatcher.add_handler(MessageHandler(
+        Filters.successful_payment, handle_users_reply, pass_job_queue=True
+    ))
     dispatcher.add_handler(MessageHandler(
         Filters.location, handle_users_reply, pass_job_queue=True
     ))
@@ -611,4 +615,5 @@ def main():
 
 
 if __name__ == '__main__':
+    load_dotenv()
     main()

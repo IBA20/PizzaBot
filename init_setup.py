@@ -1,6 +1,7 @@
 import moltin
 import os
 from tgbot import get_access_token
+from dotenv import load_dotenv
 
 
 def create_pizzeria_flow():
@@ -64,4 +65,5 @@ def main():
 
 
 if __name__ == '__main__':
+    load_dotenv()
     main()
