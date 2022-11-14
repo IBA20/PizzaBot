@@ -23,16 +23,21 @@ logger = logging.getLogger(__file__)
 _database = None
 
 
+def token_generator():
+    token_response = moltin.get_token()
+    expires = token_response['expires']
+    token = token_response['access_token']
+    while True:
+        if expires < time.time() + 60:
+            print('new token acquired at', time.ctime())
+            token_response = moltin.get_token()
+            expires = token_response['expires']
+            token = token_response['access_token']
+        yield token
+
+
 def get_access_token():
-    db = get_database_connection()
-    expires = db.get('moltin_pizzastore_expires')
-    if expires and int(expires.decode()) > time.time() + 60:
-        return db.get('moltin_pizzastore_token').decode()
-    token_data = moltin.get_token()
-    db.set('moltin_pizzastore_expires', token_data['expires'])
-    token = token_data['access_token']
-    db.set('moltin_pizzastore_token', token)
-    return token
+    return next(token_generator())
 
 
 def show_cart(bot, update):
