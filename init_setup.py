@@ -60,10 +60,10 @@ def create_customer_address_flow():
 
 
 def main():
+    load_dotenv()
     create_pizzeria_flow()
     create_customer_address_flow()
 
 
 if __name__ == '__main__':
-    load_dotenv()
     main()

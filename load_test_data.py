@@ -36,10 +36,10 @@ def import_addresses_from_json():
 
 
 def main():
+    load_dotenv()
     import_products_from_json()
     import_addresses_from_json()
 
 
 if __name__ == '__main__':
-    load_dotenv()
     main()

@@ -582,6 +582,7 @@ def get_database_connection():
 
 
 def main():
+    load_dotenv()
     logging.basicConfig(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         level=logging.INFO
@@ -614,5 +615,4 @@ def main():
 
 
 if __name__ == '__main__':
-    load_dotenv()
     main()
